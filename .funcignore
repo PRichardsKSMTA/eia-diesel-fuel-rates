@@ -2,6 +2,6 @@
 .local.settings.json
 __pycache__/
 *.pyc
-
+.vscode/
 .venv
 azurite/
