@@ -44,9 +44,7 @@ def compute_begin_end(eff_date: dt.date, span: str):
         last = eff_date.replace(day=calendar.monthrange(eff_date.year, eff_date.month)[1])
     else:
         # Weekly: effective date is Monday; period covers the week prior (Sunday–Saturday)
-        # Compute Saturday of the week prior: eff_date (Monday) minus 2 days
         last = eff_date - dt.timedelta(days=2)
-        # Compute Sunday of the week prior: Saturday minus 6 days
         first = last - dt.timedelta(days=6)
     return first, last
 
@@ -70,28 +68,30 @@ def upsert_records(cursor, records):
 def main(start_date: str, dry_run: bool = False):
     """
     Fetch EIA diesel price data from `start_date` through today.
+    Accepts ISO date (YYYY-MM-DD) and derives formats for weekly/monthly.
     If dry_run is True, prints a DataFrame of records instead of upserting.
     """
-    # Determine threshold date
-    if len(start_date) == 8:
-        threshold_date = dt.datetime.strptime(start_date, "%Y%m%d").date()
-    elif len(start_date) == 6:
-        threshold_date = dt.datetime.strptime(start_date, "%Y%m").date().replace(day=1)
-    else:
-        raise ValueError("start_date must be YYYYMMDD for weekly or YYYYMM for monthly")
+    # Parse ISO start_date
+    try:
+        parsed_date = dt.datetime.fromisoformat(start_date).date()
+    except ValueError:
+        raise ValueError("start_date must be in YYYY-MM-DD format")
     today = dt.date.today()
 
-    all_records = []
+    # Prepare parameters with dashes
+    weekly_start = parsed_date.isoformat()    # e.g. "2024-01-01"
+    monthly_start = parsed_date.strftime("%Y-%m")  # e.g. "2024-01"
 
+    all_records = []
     for span, sid in SERIES.items():
+        start_param = weekly_start if span == "Weekly" else monthly_start
         try:
-            raw = get_eia_data(sid, start_date)
+            raw = get_eia_data(sid, start_param)
         except requests.HTTPError as e:
             print(f"Skipping {span} fetch: {e}")
             continue
 
         for period, price in raw:
-            # Skip missing price records
             if price is None:
                 print(f"Skipping {span} record with missing price for period={period}")
                 continue
@@ -108,8 +108,8 @@ def main(start_date: str, dry_run: bool = False):
                 else:
                     eff = dt.datetime.strptime(period, "%Y%m").date()
 
-            # Filter by threshold and today
-            if eff < threshold_date or eff > today:
+            # Filter by parsed_date and today
+            if eff < parsed_date or eff > today:
                 continue
 
             # Compute date range
@@ -129,7 +129,7 @@ def main(start_date: str, dry_run: bool = False):
              "FUEL_RATE": r["rate"], "BEGIN_DT": r["begin_dt"], "END_DT": r["end_dt"]}
             for r in all_records
         ])
-        print(f"Dry-run mode: collected {len(df)} records")
+        print(f"Dry-run mode: collected {len(df)} records from {parsed_date} to {today}")
         print(df)
         return
 
@@ -145,16 +145,14 @@ def main(start_date: str, dry_run: bool = False):
     cursor.close()
     cnxn.close()
 
-
 if __name__ == "__main__":
     import argparse
-
     parser = argparse.ArgumentParser(
         description="Fetch and upsert EIA diesel fuel rates using APIv2 backward-compat endpoint."
     )
     parser.add_argument(
         "--start_date", required=True,
-        help="YYYYMMDD for weekly; YYYYMM for monthly"
+        help="ISO date (YYYY-MM-DD) to start fetching (weekly/monthly)."
     )
     parser.add_argument(
         "--dry_run", action="store_true",
