@@ -1,14 +1,32 @@
+import os
 import datetime as dt
-import azure.functions as func # type: ignore
+import azure.functions as func
+from fetch_fuel_rates import main as fetch_main
 
-from .fetch_fuel_rates import main as fetch_main
+
+def get_prev_week_and_month():
+    today = dt.date.today()
+    # Last week’s Monday (start of the week for API)
+    prev_monday = today - dt.timedelta(days=today.weekday() + 7)
+    weekly_start = prev_monday.strftime("%Y-%m-%d")
+
+    # First day of last month
+    first_this_month = today.replace(day=1)
+    last_month_last_day = first_this_month - dt.timedelta(days=1)
+    monthly_start = last_month_last_day.strftime("%Y-%m")
+
+    return weekly_start, monthly_start
+
 
 def main(timer: func.TimerRequest) -> None:
-    # Compute dates for weekly & monthly pulls
-    today = dt.datetime.now(dt.timezone.utc).date()
-    start_week  = (today - dt.timedelta(days=7)).strftime("%Y%m%d")
-    start_month = today.strftime("%Y%m")
+    # Allow override for testing
+    override = os.getenv("START_DATE_OVERRIDE")
+    if override:
+        # In testing mode, run a dry_run for the given ISO date
+        fetch_main(override, dry_run=True)
+        return
 
-    # Run your logic (dry_run=False by default)
-    fetch_main(start_week, dry_run=False)
-    fetch_main(start_month, dry_run=False)
+    # Normal scheduled run: fetch just last week and last month
+    weekly_start, monthly_start = get_prev_week_and_month()
+    fetch_main(weekly_start, dry_run=False)
+    fetch_main(monthly_start, dry_run=False)

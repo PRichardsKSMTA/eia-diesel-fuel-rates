@@ -67,6 +67,7 @@ instance/
 
 # Azure Function
 local.settings.json
+azurite/
 
 # Scrapy stuff:
 .scrapy
